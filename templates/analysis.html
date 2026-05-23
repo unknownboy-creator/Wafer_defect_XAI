@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>Wafer Process Analysis Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/analysis.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="title">
+      <h1>Wafer Process Analysis</h1>
+      <span class="subtitle">Defect Detection &rarr; Pattern &rarr; Zone &rarr; Process Cause</span>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="load-mock-donut" data-sim="donut">
+        Load Mock Donut Scenario
+      </button>
+      <button class="btn danger" id="reset">Reset</button>
+      <a class="btn link" href="/">&larr; Live</a>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- 0. Inspection Source (입력 이미지 + 메타) -->
+    <section class="card wide source-card">
+      <div class="card-header">
+        <h2>Inspection Source <span class="tag-blue">mock input</span></h2>
+        <span class="source-scenario" id="src-scenario">-</span>
+      </div>
+      <div class="source-grid">
+        <div class="source-image">
+          <img id="source-img" alt="wafer input">
+          <canvas id="source-overlay"></canvas>
+          <div class="source-image-empty" id="source-empty" style="display:none">
+            입력 이미지를 불러올 수 없습니다.<br>
+            <code>static/img/wafer_donut_input.jpg</code> 파일을 확인하세요.
+          </div>
+          <div class="source-overlay-control">
+            <label class="toggle-mini">
+              <input type="checkbox" id="show-detections" checked>
+              AI Detection 표시
+            </label>
+            <span class="source-detection-count" id="source-detection-count"></span>
+          </div>
+        </div>
+        <div class="source-meta">
+          <ul class="kv">
+            <li><span class="k">File</span>      <span class="v" id="src-file">-</span></li>
+            <li><span class="k">Captured</span>  <span class="v" id="src-time">-</span></li>
+            <li><span class="k">Model</span>     <span class="v" id="src-model">-</span></li>
+            <li><span class="k">Inference</span> <span class="v" id="src-infer">-</span></li>
+            <li><span class="k">Wafer Spec</span> <span class="v" id="src-spec">-</span></li>
+            <li><span class="k">Expected Defect</span> <span class="v" id="src-exp-type">-</span></li>
+            <li><span class="k">Expected Pattern</span> <span class="v badge" id="src-exp-pat">-</span></li>
+            <li><span class="k">Expected Zone</span>    <span class="v" id="src-exp-zone">-</span></li>
+          </ul>
+          <p class="source-note" id="src-note">-</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 0-1. Stain Region Analysis (stain detection 있을 때만 표시) -->
+    <section class="card wide stain-analysis-card" id="stain-analysis-card" style="display:none">
+      <div class="card-header">
+        <h2>Stain Region Analysis</h2>
+        <span class="source-scenario">영역 / 면적 / 위치 / 분포 패턴</span>
+      </div>
+      <div class="stain-metric-grid">
+        <div class="stain-metric">
+          <div class="stain-metric-num" id="stain-region-count">-</div>
+          <div class="stain-metric-label">Region Count</div>
+          <div class="stain-metric-sub" id="stain-region-sub">연결 영역 수</div>
+        </div>
+        <div class="stain-metric">
+          <div class="stain-metric-num" id="stain-area">-</div>
+          <div class="stain-metric-label">Area</div>
+          <div class="stain-metric-sub" id="stain-area-sub">실측 면적 (mm²)</div>
+        </div>
+        <div class="stain-metric">
+          <div class="stain-metric-num" id="stain-location">-</div>
+          <div class="stain-metric-label">Location</div>
+          <div class="stain-metric-sub" id="stain-location-sub">centroid zone</div>
+        </div>
+        <div class="stain-metric">
+          <div class="stain-metric-num distribution" id="stain-distribution">-</div>
+          <div class="stain-metric-label">Distribution</div>
+          <div class="stain-metric-sub" id="stain-distribution-sub">분포 패턴</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 1. Wafer Map (2칸 차지, 모드 토글 포함) -->
+    <section class="card wafer col2">
+      <div class="card-header">
+        <h2>Wafer Map</h2>
+        <div class="mode-switch">
+          <label><input type="radio" name="wafer-mode" value="status" checked>
+            Die Status</label>
+          <label><input type="radio" name="wafer-mode" value="type">
+            Defect Type</label>
+          <label><input type="radio" name="wafer-mode" value="heatmap">
+            Hotspot Heatmap</label>
+        </div>
+      </div>
+      <canvas id="wafer-canvas" width="520" height="520"></canvas>
+
+      <!-- 모드별 legend (canvas와 분리되어 wafer와 겹치지 않음) -->
+      <div class="wafer-legend" id="wafer-legend-status">
+        <span class="legend-item"><i class="sw sw-normal"></i> normal</span>
+        <span class="legend-item"><i class="sw sw-light"></i> defect (light)</span>
+        <span class="legend-item"><i class="sw sw-heavy"></i> defect (heavy)</span>
+      </div>
+      <div class="wafer-legend" id="wafer-legend-type" style="display:none">
+        <span class="legend-item"><i class="sw sw-normal"></i> normal</span>
+        <span class="legend-item"><i class="sw sw-particle"></i> particle</span>
+        <span class="legend-item"><i class="sw sw-scratch"></i> scratch</span>
+        <span class="legend-item"><i class="sw sw-stain"></i> stain</span>
+        <span class="legend-item legend-note">진한 색 = heavy, 옅은 색 = light</span>
+      </div>
+      <div class="wafer-legend" id="wafer-legend-heatmap" style="display:none">
+        <span class="legend-item">
+          <i class="sw sw-gradient"></i>
+          defect density
+          <span class="legend-range">0 &rarr; <span id="heatmap-max">-</span></span>
+        </span>
+      </div>
+
+      <!-- die 셀 숫자 의미 캡션 -->
+      <div class="wafer-caption">
+        셀 색상 <strong>진하기</strong>는 결함 강도(light/heavy).
+        숫자는 <strong>particle/scratch</strong>의 결함 개수 — stain은 면적 결함이라 개수가 아닌 색상 농도로 표현됩니다.
+      </div>
+
+      <label class="toggle">
+        <input type="checkbox" id="zone-toggle" checked>
+        zone overlay
+      </label>
+    </section>
+
+    <!-- 2. Defect Analysis Panel -->
+    <section class="card panel">
+      <h2>Defect Analysis</h2>
+      <ul class="kv">
+        <li><span class="k">Defect Type</span>     <span class="v" id="d-type">-</span></li>
+        <li><span class="k">Pattern</span>         <span class="v badge" id="d-pattern">-</span></li>
+        <li><span class="k">Dominant Zone</span>   <span class="v" id="d-zone">-</span></li>
+        <li><span class="k">Top Confidence</span>  <span class="v" id="d-conf">-</span></li>
+        <li><span class="k">Total Defects</span>   <span class="v" id="d-total">0</span></li>
+        <li><span class="k">Defective Die / Active</span>
+            <span class="v" id="d-die">- / -</span></li>
+      </ul>
+    </section>
+
+    <!-- 3. Zone Density -->
+    <section class="card chart">
+      <h2>Zone Density</h2>
+      <canvas id="zone-chart"></canvas>
+    </section>
+
+    <!-- 4. Defect Type Ratio (NEW) -->
+    <section class="card chart">
+      <h2>Defect Type Ratio</h2>
+      <canvas id="type-chart"></canvas>
+    </section>
+
+    <!-- 5. Risk Score (NEW) -->
+    <section class="card risk-card">
+      <h2>Risk Score</h2>
+      <div class="risk-value">
+        <span class="risk-number" id="risk-number">-</span>
+        <span class="risk-suffix">/ 100</span>
+      </div>
+      <div class="risk-bar">
+        <div class="risk-fill" id="risk-fill"></div>
+      </div>
+      <div class="risk-level" id="risk-level">-</div>
+      <p class="risk-advice" id="risk-advice">-</p>
+    </section>
+
+    <!-- Wafer Yield (예측 수율) -->
+    <section class="card wide yield-card">
+      <div class="card-header">
+        <h2>Wafer Yield <span class="tag-blue">예측 수율</span></h2>
+        <span class="source-scenario">정상 die / active die 기준</span>
+      </div>
+      <div class="yield-grid">
+        <div class="yield-main">
+          <div class="yield-number">
+            <span id="yield-pct">-</span><span class="yield-unit">%</span>
+          </div>
+          <div class="yield-level" id="yield-level">-</div>
+          <div class="yield-bar">
+            <div class="yield-fill" id="yield-fill"></div>
+          </div>
+          <div class="yield-bar-axis">
+            <span>0%</span><span>50%</span><span>100%</span>
+          </div>
+        </div>
+        <div class="yield-breakdown">
+          <div class="yield-stat good">
+            <div class="yield-stat-num" id="yield-good">-</div>
+            <div class="yield-stat-label">Good Die</div>
+          </div>
+          <div class="yield-stat light">
+            <div class="yield-stat-num" id="yield-light">-</div>
+            <div class="yield-stat-label">Light Defect</div>
+          </div>
+          <div class="yield-stat heavy">
+            <div class="yield-stat-num" id="yield-heavy">-</div>
+            <div class="yield-stat-label">Heavy Defect</div>
+          </div>
+          <div class="yield-stat total">
+            <div class="yield-stat-num" id="yield-total">-</div>
+            <div class="yield-stat-label">Active Die</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Process Cause Estimation -->
+    <section class="card wide highlight">
+      <h2>Process Cause Estimation <span class="tag">important</span></h2>
+
+      <!-- Top cause 강조 카드 -->
+      <div class="cause-top" id="cause-top" style="display:none">
+        <div class="cause-top-rank">#1</div>
+        <div class="cause-top-body">
+          <div class="cause-top-name" id="cause-top-name">-</div>
+          <div class="cause-top-hint" id="cause-top-hint">-</div>
+        </div>
+        <div class="cause-top-conf">
+          <div class="cause-top-conf-num" id="cause-top-conf">-</div>
+          <div class="cause-top-conf-label">confidence</div>
+        </div>
+      </div>
+
+      <!-- 보조 원인 카드 그리드 -->
+      <div class="cause-grid" id="cause-grid"></div>
+    </section>
+
+    <!-- 5. Recipe Insight -->
+    <section class="card wide">
+      <h2>Process Recipe Insight</h2>
+      <div class="recipe-grid" id="recipe-grid"></div>
+    </section>
+
+    <!-- 6. Conclusion -->
+    <section class="card wide conclusion-card">
+      <h2>Conclusion</h2>
+      <p id="conclusion" class="conclusion">-</p>
+      <div class="conclusion-chips" id="conclusion-chips"></div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

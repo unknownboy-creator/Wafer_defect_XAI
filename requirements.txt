@@ -1,0 +1,6 @@
+# Wafer Inspection System – Python dependencies
+# Install with:  pip3 install -r requirements.txt
+
+flask>=3.0.0
+opencv-python-headless>=4.9.0
+numpy>=1.24.0
